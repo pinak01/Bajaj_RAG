@@ -1,4 +1,4 @@
-import torch
+
 from PIL import Image
 from openai import OpenAI
 from pdf2image import convert_from_path
@@ -167,3 +167,4 @@ class Extract():
             
         except Exception:
             return False
+

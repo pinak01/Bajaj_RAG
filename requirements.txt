@@ -19,6 +19,12 @@ PyPDF2>=3.0.0
 pdf2image>=1.16.0
 Pillow>=10.0.0
 
+# Optional table extraction libraries (for enhanced table processing)
+pandas>=2.0.0
+tabula-py>=2.8.0
+pdfplumber>=0.10.0
+camelot-py[cv]>=0.11.0
+
 # Web framework for API
 fastapi>=0.104.0
 uvicorn>=0.24.0
@@ -26,6 +32,9 @@ pydantic>=2.0.0
 
 # HTTP requests
 requests>=2.31.0
+
+# Redis for caching
+redis>=5.0.0
 
 # Async support
 asyncio-mqtt>=0.16.0 

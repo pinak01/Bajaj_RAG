@@ -28,20 +28,21 @@ class RAGRetriever():
         # Load documents
         self.text = TextLoader(text_path, encoding='utf-8').load()
         
-        # Use smaller, faster embedding model
+        # Use smallest, fastest embedding model
         self.embedding_function = OpenAIEmbeddings(
             openai_api_key=openai_api_key,
             model="text-embedding-3-small",
-            dimensions=512  # Reduced dimensions for speed
+            dimensions=256  # Reduced dimensions for maximum speed
         )
 
         self.vecStoreDir = vecStoreDir
-        # Use faster model by default
+        # Optimized for speed
         self.chatModel = ChatOpenAI(
             model=GeneratorModel, 
             temperature=temp,
             openai_api_key=openai_api_key,
-            max_tokens=150  # Limit response length for speed
+            max_tokens=200,  # Balanced for speed vs quality
+            request_timeout=10  # Add timeout for faster failures
         )
     
     def update_chat_model(self, GeneratorModel='gpt-3.5-turbo', temp=0, device='cuda', openai_api_key=None):
@@ -51,11 +52,12 @@ class RAGRetriever():
             model=GeneratorModel, 
             temperature=temp, 
             openai_api_key=openai_api_key,
-            max_tokens=250  # Consistent token limit
+            max_tokens=200,
+            request_timeout=10
         )
 
-    def get_chunks(self, chunk_size=500, chunk_overlap=100):
-        """Optimized chunking with smaller sizes"""
+    def get_chunks(self, chunk_size=600, chunk_overlap=50):
+        """Speed-optimized chunking with larger chunks, less overlap"""
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -67,69 +69,61 @@ class RAGRetriever():
         self.chunks = texts
         return texts
     
-    def createVecStore_multiVec(self, chunk_size=500, chunk_overlap=100):
-        """Optimized vector store creation"""
-        store = InMemoryByteStore()
-        id_key = "doc_id"
+    def createVecStore_multiVec(self, chunk_size=600, chunk_overlap=50):
+        """Speed-optimized vector store - use simple retrieval for better performance"""
+        # For speed, use simple vector store instead of multi-vector
+        return self.createVecStore(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    def createVecStore(self, chunk_size=600, chunk_overlap=50):
+        """Speed-optimized simple vector store"""
+        chunks = self.get_chunks(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         
-        # Get chunks with optimized parameters
-        docs = self.get_chunks(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        logging.info(f"Creating vector store with {len(chunks)} chunks")
         
-        # Create retriever with optimized search parameters
-        retriever = MultiVectorRetriever(
-            vectorstore=Chroma(
-                collection_name="summaries", 
+        # For speed, process in smaller batches with faster settings
+        if len(chunks) > 3000:  # Reduced threshold
+            logging.info(f"Large document detected ({len(chunks)} chunks). Using batch processing.")
+            
+            # Create empty Chroma DB first
+            self.db = Chroma(
+                collection_name="speed_retrieval",
                 embedding_function=self.embedding_function
-            ),
-            byte_store=store,
-            id_key=id_key,
-            search_kwargs={"k": 2},  # Reduced from 4 to 2 for speed
-            search_type='similarity'  # Changed from 'mmr' to 'similarity' for speed
+            )
+            
+            # Smaller batches for faster processing
+            batch_size = 2000  # Reduced batch size
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i + batch_size]
+                logging.info(f"Processing batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}")
+                self.db.add_documents(batch)
+        else:
+            # For smaller documents, use the original method
+            self.db = Chroma.from_documents(
+                chunks,
+                self.embedding_function,
+                collection_name="speed_retrieval"
+            )
+        
+        # Create simple retriever for speed
+        self.MultiRetriever = self.db.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 3}  # Balanced retrieval
         )
-
-        doc_ids = [str(uuid.uuid4()) for _ in docs]
-        
-        # Reduced sub-chunking for speed
-        child_text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=150,  # Reduced from 200
-            chunk_overlap=25,  # Reduced from 50
-            length_function=len,
-            is_separator_regex=False
-        )
-        
-        sub_docs = []
-        for i, doc in enumerate(docs):
-            _id = doc_ids[i]
-            _sub_docs = child_text_splitter.split_documents([doc])
-            for _doc in _sub_docs:
-                _doc.metadata[id_key] = _id
-            sub_docs.extend(_sub_docs)
-        
-        # Batch add documents for better performance
-        retriever.vectorstore.add_documents(sub_docs)
-        retriever.docstore.mset(list(zip(doc_ids, docs)))
-        
-        self.MultiRetriever = retriever
-
-    def createVecStore(self, chunk_size=500, chunk_overlap=100):
-        """Simplified vector store for basic retrieval"""
-        self.db = Chroma.from_documents(
-            self.get_chunks(chunk_size=chunk_size, chunk_overlap=chunk_overlap),
-            self.embedding_function
-        )
+            
         return self.db
     
     def mRetriever(self, Q='query', hint=''):
-        """Optimized retriever with simplified prompt"""
+        """Speed-optimized retriever with efficient prompt"""
         RETRIEVER = self.MultiRetriever 
         
-        # Simplified, faster prompt
-        template = """Based on the context below, provide a concise answer to the question.
-        
-        Context: {context}
-        Question: {question}
-        
-        Answer:"""
+        # Speed-optimized prompt - shorter and more direct
+        template = """Answer the question based on the context provided. Be specific and informative but concise.
+
+Context: {context}
+
+Question: {question}
+
+Answer:"""
         
         if len(hint) > 0:
             template = template + f'\nHint: {hint}'
@@ -139,10 +133,10 @@ class RAGRetriever():
         self.template = template
         
         def format_docs(docs):
-            # Limit context length for faster processing
+            # Optimized context processing for speed
             context = "\n\n".join(doc.page_content for doc in docs)
-            # Truncate if too long (keep first 2000 chars)
-            return context[:2000] if len(context) > 2000 else context
+            # Reasonable context limit for speed vs quality balance
+            return context[:2500] if len(context) > 2500 else context
 
         chain = {
             "context": RETRIEVER | format_docs,
@@ -150,3 +144,4 @@ class RAGRetriever():
         } | prompt | self.chatModel | StrOutputParser()
         
         return chain.invoke(Q)
+
