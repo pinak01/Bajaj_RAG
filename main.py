@@ -42,8 +42,6 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     answers: List[str]
-    processing_time: float
-    cache_hit: bool  # New field to indicate if cache was used
 
 def get_openai_api_key():
     """Get OpenAI API key from environment variables"""
@@ -300,7 +298,7 @@ def process_questions_ultra_fast(rag_retriever, questions: List[str], hint: str 
 def process_document_and_questions_cached(
     document_url: str,
     questions: List[str]
-) -> tuple[List[str], bool]:  # Returns (answers, cache_hit)
+) -> List[str]:  # Returns only answers
     """Process document and execute multiple queries with ultra-fast caching"""
     
     # Get document hash for caching
@@ -338,13 +336,13 @@ def process_document_and_questions_cached(
         
         results = process_questions_ultra_fast(rag_retriever, questions, "", max_question_time)
         
-        return results, cache_hit
+        return results
         
     except Exception as e:
         logger.error(f"Error in ultra-fast processing: {e}")
         # Emergency fallback - return error messages quickly
         fallback_results = [f"Error: System overload - {str(e)}" for _ in range(len(questions))]
-        return fallback_results, cache_hit
+        return fallback_results
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -369,7 +367,7 @@ async def hackrx_run(
         
         # Use asyncio timeout to enforce strict time limit
         try:
-            answers, cache_hit = await asyncio.wait_for(
+            answers = await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(
                     None,
                     process_document_and_questions_cached,
@@ -383,16 +381,12 @@ async def hackrx_run(
             # Return partial/error responses for timeout
             answers = [f"Error: Request timeout - question {i+1} not processed" 
                       for i in range(len(request.questions))]
-            cache_hit = False
         
         processing_time = (datetime.now() - start_time).total_seconds()
-        cache_status = "cache hit" if cache_hit else "cache miss"
-        logger.info(f"Request completed in {processing_time:.2f} seconds ({cache_status})")
+        logger.info(f"Request completed in {processing_time:.2f} seconds")
         
         return QueryResponse(
-            answers=answers,
-            processing_time=processing_time,
-            cache_hit=cache_hit
+            answers=answers
         )
         
     except HTTPException:
@@ -404,9 +398,7 @@ async def hackrx_run(
         # Return error responses quickly
         error_answers = [f"Error: System error - {str(e)}" for _ in range(len(request.questions))]
         return QueryResponse(
-            answers=error_answers,
-            processing_time=processing_time,
-            cache_hit=False
+            answers=error_answers
         )
 
 @app.get("/health")
@@ -489,8 +481,3 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
-
-
-
-
-
